@@ -1,0 +1,469 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JPG转PDF工具</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <style>
+        .drag-area {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+            min-height: 200px;
+        }
+        .drag-over {
+            background-color: #e9ecef;
+            border-color: #6c757d;
+        }
+        .preview-container {
+            margin: 20px 0;
+        }
+        
+        .preview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            padding: 15px;
+        }
+        
+        .preview-item {
+            position: relative;
+            aspect-ratio: 1;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .preview-item:hover {
+            transform: scale(1.05);
+        }
+        .preview-img {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+        }
+        .remove-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: rgba(255,255,255,0.8);
+            border: none;
+            border-radius: 50%;
+            padding: 5px 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">JPG转PDF工具</h1>
+        
+        <div class="drag-area" id="dropZone">
+            <p>拖拽JPG图片文件到这里或点击选择文件</p>
+            <p class="text-muted small">仅支持JPG/JPEG格式</p>
+            <input type="file" id="fileInput" multiple accept="image/jpeg,image/jpg" style="display: none">
+            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                选择文件
+            </button>
+        </div>
+
+        <div class="preview-controls mb-3">
+            <div class="row align-items-center">
+                <div class="col">
+                    <h4>预览 (<span id="fileCount">0</span>个文件)</h4>
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-outline-secondary btn-sm" id="previewAllBtn">
+                        预览全部
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" id="clearAllBtn">
+                        清除全部
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="preview-container" id="previewContainer">
+            <div class="preview-grid"></div>
+        </div>
+
+        <div class="settings mb-3">
+            <h4>PDF设置</h4>
+            <div class="row">
+                <div class="col-md-3">
+                    <label class="form-label">页面大小</label>
+                    <select class="form-select" id="pageSize">
+                        <option value="A4">A4</option>
+                        <option value="A5">A5</option>
+                        <option value="Letter">Letter</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">方向</label>
+                    <select class="form-select" id="orientation">
+                        <option value="portrait">纵向</option>
+                        <option value="landscape">横向</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">边距 (mm)</label>
+                    <input type="number" class="form-control" id="margins" value="20" min="0" max="50">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">压缩级别</label>
+                    <select class="form-select" id="compression" onchange="updateSizePreview()">
+                        <option value="none">不压缩</option>
+                        <option value="low">低压缩</option>
+                        <option value="medium" selected>中等压缩</option>
+                        <option value="high">高压缩</option>
+                    </select>
+                    <small class="text-muted" id="sizePreview"></small>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn btn-success w-100" id="convertBtn" disabled>
+            转换为PDF
+        </button>
+    </div>
+
+    <div class="modal fade" id="previewModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">图片预览</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="preview-navigation">
+                        <button class="btn btn-outline-primary" id="prevImage">&lt;</button>
+                        <span id="imageCounter">1/1</span>
+                        <button class="btn btn-outline-primary" id="nextImage">&gt;</button>
+                    </div>
+                    <div class="preview-image-container">
+                        <img id="previewImage" class="img-fluid">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+    <script>
+        let uploadedFiles = [];
+        
+        // 初始化拖拽排序
+        new Sortable(document.getElementById('previewContainer'), {
+            animation: 150,
+            onEnd: function(evt) {
+                const newIndex = evt.newIndex;
+                const oldIndex = evt.oldIndex;
+                const item = uploadedFiles.splice(oldIndex, 1)[0];
+                uploadedFiles.splice(newIndex, 0, item);
+            }
+        });
+
+        // 拖拽上传处理
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const previewContainer = document.getElementById('previewContainer');
+        const convertBtn = document.getElementById('convertBtn');
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFiles(files) {
+            const totalFiles = files.length;
+            let processedFiles = 0;
+            
+            Array.from(files).forEach(file => {
+                if (!file.type.match('image/jpeg') && !file.type.match('image/jpg')) {
+                    alert('请只上传JPG/JPEG格式的图片文件！');
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    uploadedFiles.push(data.filename);
+                    processedFiles++;
+                    showProgress(processedFiles, totalFiles);
+                    
+                    if (processedFiles === totalFiles) {
+                        updatePreview();
+                        updateSizePreview();
+                        convertBtn.disabled = false;
+                        document.querySelector('.batch-progress')?.remove();
+                    }
+                })
+                .catch(error => {
+                    alert('上传失败：' + error.message);
+                    processedFiles++;
+                    showProgress(processedFiles, totalFiles);
+                });
+            });
+        }
+
+        function updatePreview() {
+            const previewGrid = previewContainer.querySelector('.preview-grid');
+            previewGrid.innerHTML = '';
+            fileCountSpan.textContent = uploadedFiles.length;
+            
+            uploadedFiles.forEach((filepath, index) => {
+                const div = document.createElement('div');
+                div.className = 'preview-item';
+                const filename = typeof filepath === 'string' ? filepath.split('/').pop() : filepath;
+                div.innerHTML = `
+                    <img src="/uploads/${filename}" class="preview-img" alt="预览图片" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22100%22><rect width=%22100%22 height=%22100%22 fill=%22%23eee%22/><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23aaa%22>加载失败</text></svg>';">
+                    <button class="remove-btn" onclick="event.stopPropagation(); removeFile(${index})">×</button>
+                `;
+                div.addEventListener('click', () => {
+                    currentPreviewIndex = index;
+                    showPreviewImage();
+                    modal.show();
+                });
+                previewGrid.appendChild(div);
+            });
+        }
+
+        function removeFile(index) {
+            const fileToRemove = uploadedFiles[index];
+            console.log('正在删除文件:', fileToRemove);  // 添加调试信息
+            
+            fetch('/remove-file', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ file: fileToRemove })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || '删除失败');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('删除成功:', data);  // 添加调试信息
+                uploadedFiles.splice(index, 1);
+                updatePreview();
+                updateSizePreview();
+                convertBtn.disabled = uploadedFiles.length === 0;
+            })
+            .catch(error => {
+                console.error('删除失败:', error);  // 添加调试信息
+                alert('删除失败：' + error.message);
+            });
+        }
+
+        convertBtn.addEventListener('click', () => {
+            if (uploadedFiles.length === 0) {
+                alert('请先上传图片文件');
+                return;
+            }
+
+            convertBtn.disabled = true;
+            convertBtn.textContent = '正在转换...';
+
+            const settings = {
+                files: uploadedFiles,
+                pageSize: document.getElementById('pageSize').value,
+                orientation: document.getElementById('orientation').value,
+                margins: parseInt(document.getElementById('margins').value),
+                compression: document.getElementById('compression').value
+            };
+
+            fetch('/convert', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(settings)
+            })
+            .then(response => response.blob())
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'converted.pdf';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+                
+                convertBtn.disabled = false;
+                convertBtn.textContent = '转换为PDF';
+            })
+            .catch(error => {
+                alert('转换失败：' + error.message);
+                convertBtn.disabled = false;
+                convertBtn.textContent = '转换为PDF';
+            });
+        });
+
+        // 预览相关变量
+        let currentPreviewIndex = 0;
+        const modal = new bootstrap.Modal(document.getElementById('previewModal'));
+        const previewImage = document.getElementById('previewImage');
+        const imageCounter = document.getElementById('imageCounter');
+        const fileCountSpan = document.getElementById('fileCount');
+
+        // 预览控制按钮事件
+        document.getElementById('previewAllBtn').addEventListener('click', () => {
+            if (uploadedFiles.length > 0) {
+                currentPreviewIndex = 0;
+                showPreviewImage();
+                modal.show();
+            }
+        });
+
+        document.getElementById('clearAllBtn').addEventListener('click', () => {
+            if (uploadedFiles.length > 0 && confirm('确定要清除所有文件吗？')) {
+                const deletePromises = uploadedFiles.map(filename => 
+                    fetch('/remove-file', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ file: filename })
+                    })
+                );
+                
+                Promise.all(deletePromises)
+                    .then(() => {
+                        uploadedFiles = [];
+                        updatePreview();
+                        updateSizePreview();
+                        convertBtn.disabled = true;
+                    })
+                    .catch(error => {
+                        alert('清除文件失败：' + error.message);
+                    });
+            }
+        });
+
+        // 预览导航
+        document.getElementById('prevImage').addEventListener('click', () => {
+            if (currentPreviewIndex > 0) {
+                currentPreviewIndex--;
+                showPreviewImage();
+            }
+        });
+
+        document.getElementById('nextImage').addEventListener('click', () => {
+            if (currentPreviewIndex < uploadedFiles.length - 1) {
+                currentPreviewIndex++;
+                showPreviewImage();
+            }
+        });
+
+        // 显示预览图片
+        function showPreviewImage() {
+            const filepath = uploadedFiles[currentPreviewIndex];
+            const filename = typeof filepath === 'string' ? filepath.split('/').pop() : filepath;
+            previewImage.src = `/uploads/${filename}`;
+            imageCounter.textContent = `${currentPreviewIndex + 1}/${uploadedFiles.length}`;
+        }
+
+        // 批量处理进度提示
+        function showProgress(current, total) {
+            let progress = document.querySelector('.batch-progress');
+            if (!progress) {
+                progress = document.createElement('div');
+                progress.className = 'batch-progress';
+                document.body.appendChild(progress);
+            }
+            
+            progress.style.display = 'block';
+            progress.innerHTML = `
+                <div>处理进度：${current}/${total}</div>
+                <div class="progress">
+                    <div class="progress-bar" style="width: ${(current/total)*100}%"></div>
+                </div>
+            `;
+            
+            if (current === total) {
+                setTimeout(() => {
+                    progress.style.display = 'none';
+                }, 1000);
+            }
+        }
+
+        // 添加文件大小格式化函数
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 添加压缩预览函数
+        function updateSizePreview() {
+            const compression = document.getElementById('compression').value;
+            const sizePreview = document.getElementById('sizePreview');
+            
+            if (uploadedFiles.length === 0) {
+                sizePreview.textContent = '';
+                return;
+            }
+
+            // 发送预览请求
+            fetch('/preview-size', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    files: uploadedFiles,
+                    compression: compression
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                const originalSize = formatFileSize(data.originalSize);
+                const compressedSize = formatFileSize(data.compressedSize);
+                const savings = data.savings.toFixed(1);
+                
+                sizePreview.innerHTML = `
+                    <div class="mt-2">
+                        <div>原始大小: ${originalSize}</div>
+                        <div>压缩后: ${compressedSize}</div>
+                        <div>节省: ${savings}%</div>
+                    </div>
+                `;
+            })
+            .catch(error => {
+                console.error('预览大小失败:', error);
+                sizePreview.textContent = '无法预览文件大小';
+            });
+        }
+    </script>
+</body>
+</html>
